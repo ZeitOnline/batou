@@ -95,11 +95,8 @@ class Deployment(object):
             if info['dependencies']:
                 continue
             del todolist[key]
-            if self.run_async:
-                asyncio.ensure_future(
-                    self._deploy_component(key, info, todolist))
-            else:
-                return self._deploy_component(key, info, todolist)
+            asyncio.ensure_future(
+                self._deploy_component(key, info, todolist))
 
     async def _deploy_component(self, key, info, todolist):
         hostname, component = key
@@ -153,8 +150,14 @@ class Deployment(object):
                 self.loop.run_until_complete(asyncio.gather(*pending))
                 pending = {t for t in asyncio.Task.all_tasks() if not t.done()}
         else:
-            asyncio.run(
-                self._launch_components(reference_node.root_dependencies()))
+            todolist = reference_node.root_dependencies()
+            for key, info in list(todolist.items()):
+                self._launch_components({key: info})
+                pending = asyncio.Task.all_tasks()
+                while pending:
+                    self.loop.run_until_complete(asyncio.gather(*pending))
+                    pending = {t for t in (
+                        asyncio.Task.all_tasks()) if not t.done()}
 
     def disconnect(self):
         output.step("main", "Disconnecting from nodes ...", debug=True)
