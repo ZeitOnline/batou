@@ -142,12 +142,12 @@ class Deployment(object):
         reference_node = [h for h in list(self.environment.hosts.values())
                           if not h.ignore][0]
 
-        if self.run_async:
-            self.loop = asyncio.get_event_loop()
-            self.taskpool = ThreadPoolExecutor(10)
-            self.loop.set_default_executor(self.taskpool)
-            self._launch_components(reference_node.root_dependencies())
+        self.loop = asyncio.get_event_loop()
+        self.taskpool = ThreadPoolExecutor(10)
+        self.loop.set_default_executor(self.taskpool)
 
+        if self.run_async:
+            self._launch_components(reference_node.root_dependencies())
             pending = asyncio.Task.all_tasks()
             while pending:
                 self.loop.run_until_complete(asyncio.gather(*pending))
