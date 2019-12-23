@@ -152,7 +152,11 @@ class Deployment(object):
         else:
             todolist = reference_node.root_dependencies()
             for key, info in list(todolist.items()):
-                self._launch_components({key: info})
+                if info['dependencies']:
+                    continue
+                del todolist[key]
+                asyncio.ensure_future(
+                    self._deploy_component(key, info, todolist))
                 pending = asyncio.Task.all_tasks()
                 while pending:
                     self.loop.run_until_complete(asyncio.gather(*pending))
