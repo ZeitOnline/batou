@@ -90,13 +90,23 @@ class Deployment(object):
         # Consume the connection iterator to establish remaining connections.
         self.connections = list(self._connections())
 
-    def _launch_components(self, todolist):
+    def _launch_components(self, todolist, recursed=False):
         for key, info in list(todolist.items()):
             if info['dependencies']:
                 continue
             del todolist[key]
             asyncio.ensure_future(
                 self._deploy_component(key, info, todolist))
+            if not self.run_async and not recursed:
+                self._process_tasks()
+        if self.run_async and not recursed:
+            self._process_tasks()
+
+    def _process_tasks(self):
+        pending = asyncio.Task.all_tasks()
+        while pending:
+            self.loop.run_until_complete(asyncio.gather(*pending))
+            pending = {t for t in asyncio.Task.all_tasks() if not t.done()}
 
     async def _deploy_component(self, key, info, todolist):
         hostname, component = key
@@ -122,7 +132,7 @@ class Deployment(object):
                 other_component['dependencies'].remove(key)
 
         # Trigger start of unblocked dependencies
-        self._launch_components(todolist)
+        self._launch_components(todolist, recursed=True)
 
     def deploy(self):
         # Wait for all connections to finish
@@ -142,26 +152,7 @@ class Deployment(object):
         self.loop = asyncio.get_event_loop()
         self.taskpool = ThreadPoolExecutor(10)
         self.loop.set_default_executor(self.taskpool)
-
-        if self.run_async:
-            self._launch_components(reference_node.root_dependencies())
-            pending = asyncio.Task.all_tasks()
-            while pending:
-                self.loop.run_until_complete(asyncio.gather(*pending))
-                pending = {t for t in asyncio.Task.all_tasks() if not t.done()}
-        else:
-            todolist = reference_node.root_dependencies()
-            for key, info in list(todolist.items()):
-                if info['dependencies']:
-                    continue
-                del todolist[key]
-                asyncio.ensure_future(
-                    self._deploy_component(key, info, todolist))
-                pending = asyncio.Task.all_tasks()
-                while pending:
-                    self.loop.run_until_complete(asyncio.gather(*pending))
-                    pending = {t for t in (
-                        asyncio.Task.all_tasks()) if not t.done()}
+        self._launch_components(reference_node.root_dependencies())
 
     def disconnect(self):
         output.step("main", "Disconnecting from nodes ...", debug=True)
