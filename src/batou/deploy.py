@@ -30,6 +30,19 @@ class Connector(threading.Thread):
             raise exc_type(exc_value).with_traceback(exc_tb)
 
 
+class OrderOfExecution(object):
+
+    def __init__(self):
+        self.order = []
+
+    def __call__(self, name_of_component):
+        self.order.append(name_of_component)
+
+    def __str__(self):
+        processed = ", ".join(["{}:{}".format(host, component) for host, component in self.order])
+        return processed
+
+
 class Deployment(object):
 
     _upstream = None
@@ -44,6 +57,7 @@ class Deployment(object):
         self.predict_only = predict_only
         self.reset = reset
         self.run_async = run_async
+        self.order = OrderOfExecution()
 
     def load(self):
         output.section("Preparing")
@@ -94,6 +108,8 @@ class Deployment(object):
         for key, info in list(todolist.items()):
             if info['dependencies']:
                 continue
+            if key in self.order.order:
+                continue
             del todolist[key]
             asyncio.ensure_future(
                 self._deploy_component(key, info, todolist))
@@ -106,6 +122,10 @@ class Deployment(object):
         pending = asyncio.Task.all_tasks()
         while pending:
             self.loop.run_until_complete(asyncio.gather(*pending))
+            if self.run_async:
+                output.section("Async Completion: {}".format(self.order))
+            else:
+                output.section("Sync Completion: {}".format(self.order))
             pending = {t for t in asyncio.Task.all_tasks() if not t.done()}
 
     async def _deploy_component(self, key, info, todolist):
@@ -125,6 +145,7 @@ class Deployment(object):
                 hostname, "Deploying component {} ...".format(component))
             await self.loop.run_in_executor(
                 None, host.deploy_component, component, self.predict_only)
+        self.order(key)
 
         # Clear dependency from todolist
         for other_component in todolist.values():
