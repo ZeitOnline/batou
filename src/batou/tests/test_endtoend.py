@@ -117,3 +117,11 @@ otherhost: Skipping component fail2 ... (Host ignored)
 ============================= DEPLOYMENT FINISHED ============================\
 ==
 """)
+
+
+def test_example_async():
+    os.chdir('examples/sync_async')
+    out, _ = cmd('./batou deploy ignores')
+    assert out == Ellipsis("""\
+batou/2\
+""")
