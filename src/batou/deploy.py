@@ -30,19 +30,6 @@ class Connector(threading.Thread):
             raise exc_type(exc_value).with_traceback(exc_tb)
 
 
-class OrderOfExecution(object):
-
-    def __init__(self):
-        self.order = []
-
-    def __call__(self, name_of_component):
-        self.order.append(name_of_component)
-
-    def __str__(self):
-        processed = ", ".join(["{}:{}".format(host, component) for host, component in self.order])
-        return processed
-
-
 class Deployment(object):
 
     _upstream = None
@@ -57,7 +44,6 @@ class Deployment(object):
         self.predict_only = predict_only
         self.reset = reset
         self.run_async = run_async
-        self.order = OrderOfExecution()
 
     def load(self):
         output.section("Preparing")
@@ -104,19 +90,33 @@ class Deployment(object):
         # Consume the connection iterator to establish remaining connections.
         self.connections = list(self._connections())
 
-    def _launch_components(self, todolist, recursed=False):
+    def _launch_components_hostwise(self, todolist):
+        hosts = {}
+        unprocessed = {}
+        for key, info in list(todolist.items()):
+            if not hosts.get(key[0]):
+                hosts[key[0]] = {}
+            hosts[key[0]][key] = info
+        for host, todolist in hosts.items():
+            self._launch_components(todolist)
+            output.section("TODOLIST AFTER LAUNCH {}".format(todolist))
+            if todolist:
+                unprocessed = {**unprocessed, **todolist}
+        if unprocessed:
+            output.section("Recursion {}".format(unprocessed))
+            #self._launch_components_hostwise(unprocessed)
+
+
+    def _launch_components(self, todolist):
+        output.section("TODOLIST {}".format(todolist))
         for key, info in list(todolist.items()):
             if info['dependencies']:
                 continue
-            if key in self.order.order:
-                continue
             del todolist[key]
+            output.section("DEL {}".format(key))
             asyncio.ensure_future(
                 self._deploy_component(key, info, todolist))
-            if not self.run_async and not recursed:
-                self._process_tasks()
-        if self.run_async and not recursed:
-            self._process_tasks()
+        self._process_tasks()
 
     def _process_tasks(self):
         pending = asyncio.Task.all_tasks()
@@ -145,7 +145,6 @@ class Deployment(object):
                 hostname, "Deploying component {} ...".format(component))
             await self.loop.run_in_executor(
                 None, host.deploy_component, component, self.predict_only)
-        self.order(key)
 
         # Clear dependency from todolist
         for other_component in todolist.values():
@@ -153,7 +152,7 @@ class Deployment(object):
                 other_component['dependencies'].remove(key)
 
         # Trigger start of unblocked dependencies
-        self._launch_components(todolist, recursed=True)
+        self._launch_components(todolist)
 
     def deploy(self):
         # Wait for all connections to finish
@@ -173,7 +172,12 @@ class Deployment(object):
         self.loop = asyncio.get_event_loop()
         self.taskpool = ThreadPoolExecutor(10)
         self.loop.set_default_executor(self.taskpool)
-        self._launch_components(reference_node.root_dependencies())
+
+        if self.run_async:
+            self._launch_components(reference_node.root_dependencies())
+        else:
+            self._launch_components_hostwise(
+                reference_node.root_dependencies())
 
     def disconnect(self):
         output.step("main", "Disconnecting from nodes ...", debug=True)
