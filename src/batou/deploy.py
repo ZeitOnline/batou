@@ -35,7 +35,7 @@ class Deployment(object):
     _upstream = None
 
     def __init__(self, environment, platform, timeout, dirty, fast,
-                 predict_only=False, reset=False, run_async=False):
+                 predict_only=False, reset=False, deploy_hostwise=True):
         self.environment = environment
         self.platform = platform
         self.timeout = timeout
@@ -43,7 +43,7 @@ class Deployment(object):
         self.fast = fast
         self.predict_only = predict_only
         self.reset = reset
-        self.run_async = run_async
+        self.deploy_hostwise = deploy_hostwise
 
     def load(self):
         output.section("Preparing")
@@ -93,42 +93,46 @@ class Deployment(object):
     def _launch_components_hostwise(self, todolist):
         hosts = {}
         unprocessed = {}
+        processed = []
         for key, info in list(todolist.items()):
             if not hosts.get(key[0]):
                 hosts[key[0]] = {}
             hosts[key[0]][key] = info
         for host, todolist in hosts.items():
-            self._launch_components(todolist)
-            output.section("TODOLIST AFTER LAUNCH {}".format(todolist))
+            output.step(key[0],
+                        "Deploying all components independend "
+                        "from other hosts")
+            self._launch_components(todolist, processed)
+            self._process_tasks()
             if todolist:
                 unprocessed = {**unprocessed, **todolist}
         if unprocessed:
-            output.section("Recursion {}".format(unprocessed))
-            #self._launch_components_hostwise(unprocessed)
+            self._launch_components_hostwise(
+                self._clear_dependencies(unprocessed, processed))
 
+    def _clear_dependencies(self, unprocessed, processed):
+        """ Clear dependencies, when deploying hostwise """
+        for key, info in unprocessed.items():
+            for component in processed:
+                if component in info['dependencies']:
+                    info['dependencies'].remove(component)
+        return unprocessed
 
-    def _launch_components(self, todolist):
-        output.section("TODOLIST {}".format(todolist))
+    def _launch_components(self, todolist, processed=[]):
         for key, info in list(todolist.items()):
             if info['dependencies']:
                 continue
             del todolist[key]
-            output.section("DEL {}".format(key))
             asyncio.ensure_future(
-                self._deploy_component(key, info, todolist))
-        self._process_tasks()
+                self._deploy_component(key, info, todolist, processed))
 
     def _process_tasks(self):
         pending = asyncio.Task.all_tasks()
         while pending:
             self.loop.run_until_complete(asyncio.gather(*pending))
-            if self.run_async:
-                output.section("Async Completion: {}".format(self.order))
-            else:
-                output.section("Sync Completion: {}".format(self.order))
             pending = {t for t in asyncio.Task.all_tasks() if not t.done()}
 
-    async def _deploy_component(self, key, info, todolist):
+    async def _deploy_component(self, key, info, todolist, processed=[]):
         hostname, component = key
         host = self.environment.hosts[hostname]
         if host.ignore:
@@ -145,6 +149,8 @@ class Deployment(object):
                 hostname, "Deploying component {} ...".format(component))
             await self.loop.run_in_executor(
                 None, host.deploy_component, component, self.predict_only)
+
+        processed.append(key)
 
         # Clear dependency from todolist
         for other_component in todolist.values():
@@ -173,11 +179,11 @@ class Deployment(object):
         self.taskpool = ThreadPoolExecutor(10)
         self.loop.set_default_executor(self.taskpool)
 
-        if self.run_async:
-            self._launch_components(reference_node.root_dependencies())
-        else:
+        if self.deploy_hostwise:
             self._launch_components_hostwise(
                 reference_node.root_dependencies())
+        else:
+            self._launch_components(reference_node.root_dependencies())
 
     def disconnect(self):
         output.step("main", "Disconnecting from nodes ...", debug=True)
