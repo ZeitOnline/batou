@@ -119,9 +119,31 @@ otherhost: Skipping component fail2 ... (Host ignored)
 """)
 
 
-def test_example_async():
+def test_example_hostwise_deployment():
     os.chdir('examples/sync_async')
     out, _ = cmd('./batou deploy ignores')
     assert out == Ellipsis("""\
-batou/2\
+batou/2... (cpython 3...)
+================================== Preparing =================================\
+==
+main: Loading environment `ignores`...
+main: Verifying repository ...
+main: Loading secrets ...
+================================ Connecting ... ==============================\
+==
+localhost: Connecting via local (1/2)
+otherhost: Connection ignored (2/2)
+============================ Configuring model ... ===========================\
+==
+==================== Waiting for remaining connections ... ===================\
+==
+================================== Deploying =================================\
+==
+otherhost: Skipping component component1 ... (Host ignored)
+otherhost: Skipping component componentsub ... (Host ignored)
+otherhost: Skipping component component2 ... (Host ignored)
+localhost: Deploying component component1 ...
+localhost: Deploying component component2 ...
+============================= DEPLOYMENT FINISHED ============================\
+==
 """)

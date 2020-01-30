@@ -99,9 +99,6 @@ class Deployment(object):
                 hosts[key[0]] = {}
             hosts[key[0]][key] = info
         for host, todolist in hosts.items():
-            output.step(key[0],
-                        "Deploying all components independend "
-                        "from other hosts")
             self._launch_components(todolist, processed)
             self._process_tasks()
             if todolist:
